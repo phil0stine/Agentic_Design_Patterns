@@ -1,0 +1,54 @@
+# SITL — Software In The Loop
+# Usage:
+#   docker compose -f docker/docker-compose.sitl.yml --env-file .env up
+#
+# Prerequisites:
+#   - Simulator already running and publishing ROS2 topics
+#   - .env file with ANTHROPIC_API_KEY
+
+name: autonomy-sitl
+
+services:
+  autonomy_agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.x86   # change to Dockerfile.arm64 on Jetson
+    image: autonomy-stack:sitl
+    container_name: autonomy_agent_sitl
+
+    # host networking gives the container access to all ROS2 DDS traffic
+    # on the host without any port mapping complexity
+    network_mode: host
+
+    # NET_ADMIN is required for iptables inside the container
+    cap_add:
+      - NET_ADMIN
+
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - AGENT_MODE=sitl
+      - AGENT_LOG_LEVEL=${AGENT_LOG_LEVEL:-INFO}
+      - RESTRICT_NETWORK=${RESTRICT_NETWORK:-true}
+      - ROS_NETWORK_SUBNET=${ROS_NETWORK_SUBNET:-127.0.0.0/8}
+
+    volumes:
+      # Mount goal file — override at runtime by setting GOAL_FILE in .env
+      - ${GOAL_FILE:-../config/goals/example_sitl_goal.yaml}:/active_goal.yaml:ro
+      # Optionally mount your compiled ROS2 workspace
+      # - /path/to/ros2_ws/install:/workspace/install:ro
+      - sitl_logs:/app/logs
+
+    command:
+      - python3
+      - -m
+      - agent.main
+      - --mode
+      - sitl
+      - --goal
+      - /active_goal.yaml
+
+    restart: no
+
+volumes:
+  sitl_logs:

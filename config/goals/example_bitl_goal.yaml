@@ -1,0 +1,25 @@
+# Example BITL goal: analyze a recorded trajectory bag
+
+name: trajectory_analysis
+
+description: |
+  Analyze the robot trajectory recorded in the bag file.
+  Identify anomalies, localization degradation, GPS outages,
+  and high odometry drift. Produce a structured assessment.
+
+success_criteria: |
+  A complete analysis has been logged covering:
+  - Total estimated distance traveled (from odometry)
+  - Any periods where GPS status dropped below 1 (no fix)
+  - Any sudden jumps in position (> 2.0 m between readings)
+  - An overall localization quality assessment (good / degraded / poor)
+
+constraints:
+  - This is a read-only analysis — do not send navigation commands
+  - Analyze data at the bag's natural playback rate
+  - Use log_status to record findings as you go
+
+parameters:
+  gps_min_quality: 1
+  max_position_jump_m: 2.0
+  analysis_window_s: 10.0

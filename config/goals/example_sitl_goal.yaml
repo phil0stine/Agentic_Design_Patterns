@@ -1,0 +1,29 @@
+# Example SITL goal: navigate through a square of waypoints and return home
+
+name: square_patrol
+
+description: |
+  Navigate the robot through four waypoints forming a 5m square in the
+  simulator, visiting them in order (A -> B -> C -> D), then return to
+  the home position at (0, 0).
+
+success_criteria: |
+  All four waypoints have been visited (within 0.5 m tolerance each)
+  and the robot has returned to within 1.0 m of the origin (0, 0).
+
+constraints:
+  - Do not collide with obstacles; maintain at least 0.3 m clearance
+  - Do not exceed 1.0 m/s linear velocity
+  - Complete the full patrol within 10 minutes
+  - Stop and reassess if LiDAR min range drops below 0.4 m
+
+parameters:
+  home: {x: 0.0, y: 0.0}
+  waypoints:
+    - {x:  5.0, y:  0.0, label: "A"}
+    - {x:  5.0, y:  5.0, label: "B"}
+    - {x:  0.0, y:  5.0, label: "C"}
+    - {x:  0.0, y:  0.0, label: "D (home)"}
+  arrival_tolerance_m: 0.5
+  home_tolerance_m: 1.0
+  timeout_s: 600

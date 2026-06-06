@@ -1,0 +1,22 @@
+# Autonomy Agent Configuration
+
+# Claude model to use as the reasoning engine
+# claude-opus-4-8 is the most capable; use claude-haiku-4-5-20251001 for lower latency/cost
+model: claude-opus-4-8
+max_tokens: 8192
+
+ros:
+  node_name: autonomy_agent
+  # Topics — remap these to match your actual stack
+  topics:
+    odom: /odom
+    gps: /gps/fix
+    imu: /imu/data
+    scan: /scan
+    cmd_vel: /cmd_vel
+  nav2_action: navigate_to_pose
+  state_timeout_s: 10.0
+
+agent:
+  max_iterations: 200
+  loop_sleep_s: 1.0
