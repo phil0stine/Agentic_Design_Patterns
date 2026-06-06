@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+# =============================================================
+# Claude Code agent container
+# Network policy: api.anthropic.com:443 ONLY
+#                 GitHub and all other egress is BLOCKED
+#
+# The agent commits to a mounted host volume.
+# git push is impossible from inside this container.
+# The human reviews local commits and decides when to push.
+# =============================================================
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ---- System tools -------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gnupg \
+    git \
+    python3 python3-pip python3-venv \
+    iptables iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- Node.js (required by Claude Code CLI) ------------------
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- Claude Code CLI ----------------------------------------
+RUN npm install -g @anthropic-ai/claude-code
+
+# ---- Python tools for running tests and linting -------------
+RUN pip3 install --no-cache-dir --break-system-packages \
+    pytest ruff mypy \
+    anthropic pyyaml tenacity
+
+# ---- Claude Code settings -----------------------------------
+# Pre-configure allowed tools and disable update checks.
+# The agent runs with a fixed, declared toolset.
+COPY docker/claude-settings.json /root/.claude/settings.json
+
+# ---- Scripts ------------------------------------------------
+COPY scripts/workspace_init.sh /usr/local/bin/workspace_init
+COPY docker/network/restrict_claude.sh /usr/local/bin/restrict_network
+RUN chmod +x /usr/local/bin/workspace_init /usr/local/bin/restrict_network
+
+COPY docker/claude-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/entrypoint.sh"]

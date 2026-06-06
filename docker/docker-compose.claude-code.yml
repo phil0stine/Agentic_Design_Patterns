@@ -1,0 +1,54 @@
+# Claude Code agent — air-gapped except for api.anthropic.com
+#
+# Usage:
+#   WORKSPACE_PATH=/path/to/your/repo \
+#   AGENT_GOAL="your task here" \
+#   docker compose -f docker/docker-compose.claude-code.yml --env-file .env up
+#
+# Or with a goal file:
+#   GOAL_FILE=/path/to/goal.txt \
+#   docker compose -f docker/docker-compose.claude-code.yml --env-file .env up
+#
+# After the container exits, review commits on the host:
+#   cd $WORKSPACE_PATH && git log --oneline -20
+#   git diff checkpoint-<timestamp>..HEAD
+# Then push manually when satisfied:
+#   git push origin <branch>
+
+name: claude-code-agent
+
+services:
+  claude_code:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.claude-code
+    container_name: claude_code_agent
+
+    # Bridge networking (default) — not host.
+    # The container gets its own network namespace;
+    # iptables rules in restrict_claude.sh then drop everything
+    # except api.anthropic.com:443.
+    # github.com is unreachable. git push cannot succeed.
+
+    cap_add:
+      - NET_ADMIN   # required for iptables inside container
+
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AGENT_GOAL=${AGENT_GOAL:-}
+      - GOAL_FILE=${GOAL_FILE:-}
+      - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-Autonomy Agent}
+      - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-agent@autonomy.local}
+
+    volumes:
+      # The repo is mounted from the host. Commits made inside the
+      # container are immediately visible on the host. The container
+      # cannot push them — that requires a human action outside.
+      - ${WORKSPACE_PATH:?set WORKSPACE_PATH to your repo root}:/workspace
+
+      # Mount goal file if using file-based goals
+      - ${GOAL_FILE:-/dev/null}:${GOAL_FILE:-/dev/null}:ro
+
+    restart: no
+    # Container exits when Claude Code finishes or fails.
+    # Exit code is Claude's exit code.
