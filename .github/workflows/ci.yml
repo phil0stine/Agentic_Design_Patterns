@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  # ------------------------------------------------------------------ #
+  # 1. Lint + static analysis                                            #
+  # ------------------------------------------------------------------ #
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint tools
+        run: pip install ruff mypy pyyaml
+
+      - name: ruff (style + errors)
+        run: ruff check agent/
+
+      - name: mypy (type check)
+        run: |
+          # Stub out rclpy so mypy can run outside a ROS environment
+          mkdir -p stubs/rclpy stubs/nav2_msgs stubs/geometry_msgs \
+                   stubs/sensor_msgs stubs/std_msgs stubs/nav_msgs
+          touch stubs/rclpy/__init__.pyi stubs/nav2_msgs/__init__.pyi \
+                stubs/geometry_msgs/__init__.pyi stubs/sensor_msgs/__init__.pyi \
+                stubs/std_msgs/__init__.pyi stubs/nav_msgs/__init__.pyi
+          MYPYPATH=stubs mypy agent/ \
+            --ignore-missing-imports \
+            --no-error-summary
+
+  # ------------------------------------------------------------------ #
+  # 2. Validate all YAML configs                                         #
+  # ------------------------------------------------------------------ #
+  validate-config:
+    name: Validate configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pyyaml
+        run: pip install pyyaml
+
+      - name: Parse all YAML files
+        run: |
+          python3 - <<'EOF'
+          import yaml, pathlib, sys
+          errors = []
+          for f in pathlib.Path(".").rglob("*.yaml"):
+              if ".github" in f.parts:
+                  continue
+              try:
+                  yaml.safe_load(f.read_text())
+                  print(f"  OK  {f}")
+              except yaml.YAMLError as e:
+                  errors.append(f"FAIL {f}: {e}")
+          if errors:
+              print("\nYAML errors found:", file=sys.stderr)
+              for e in errors:
+                  print(e, file=sys.stderr)
+              sys.exit(1)
+          EOF
+
+      - name: Validate agent config schema
+        run: |
+          python3 - <<'EOF'
+          import yaml, sys
+
+          REQUIRED_AGENT_KEYS = {"model", "max_tokens", "ros", "agent"}
+          REQUIRED_ROS_KEYS   = {"topics", "nav2_action"}
+          REQUIRED_GOAL_KEYS  = {"name", "description", "success_criteria"}
+
+          def check(path, data, required):
+              missing = required - data.keys()
+              if missing:
+                  print(f"FAIL {path}: missing keys {missing}", file=sys.stderr)
+                  sys.exit(1)
+              print(f"  OK  {path}")
+
+          agent_cfg = yaml.safe_load(open("config/agent.yaml"))
+          check("config/agent.yaml", agent_cfg, REQUIRED_AGENT_KEYS)
+          check("config/agent.yaml [ros]", agent_cfg["ros"], REQUIRED_ROS_KEYS)
+
+          import pathlib
+          for gf in pathlib.Path("config/goals").glob("*.yaml"):
+              goal = yaml.safe_load(gf.read_text())
+              check(str(gf), goal, REQUIRED_GOAL_KEYS)
+          EOF
+
+  # ------------------------------------------------------------------ #
+  # 3. Unit tests (mocked ROS2)                                          #
+  # ------------------------------------------------------------------ #
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install pytest anthropic pyyaml tenacity
+          # Install ROS stub so agent code can be imported
+          pip install rclpy-stubs 2>/dev/null || true
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+        env:
+          # Tests use a mock client; key value doesn't matter
+          ANTHROPIC_API_KEY: test-key-not-real
+
+  # ------------------------------------------------------------------ #
+  # 4. Docker build (x86 only in CI)                                    #
+  # ------------------------------------------------------------------ #
+  docker-build:
+    name: Docker build (x86)
+    runs-on: ubuntu-latest
+    # Only run on PRs and main pushes (expensive step)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.x86
+          push: false
+          tags: autonomy-stack:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ------------------------------------------------------------------ #
+  # 5. Secret scanning                                                   #
+  # ------------------------------------------------------------------ #
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

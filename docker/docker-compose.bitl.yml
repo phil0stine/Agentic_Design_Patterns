@@ -1,0 +1,60 @@
+# BITL — Bag In The Loop
+# Usage:
+#   BAG_PATH=/path/to/bags BAG_FILE=my_bag \
+#   docker compose -f docker/docker-compose.bitl.yml --env-file .env up
+#
+# The bag_player service plays the bag; the agent subscribes and analyzes.
+
+name: autonomy-bitl
+
+services:
+  bag_player:
+    image: ros:jazzy-ros-base
+    container_name: bag_player
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    volumes:
+      - ${BAG_PATH}:/bags:ro
+    command: >-
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        ros2 bag play /bags/${BAG_FILE:-bag}
+          ${BAG_LOOP:---loop}
+          --rate ${BAG_RATE:-1.0}
+      "
+    restart: no
+
+  autonomy_agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.x86
+    image: autonomy-stack:bitl
+    container_name: autonomy_agent_bitl
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - AGENT_MODE=bitl
+      - AGENT_LOG_LEVEL=${AGENT_LOG_LEVEL:-INFO}
+      - RESTRICT_NETWORK=${RESTRICT_NETWORK:-true}
+      - ROS_NETWORK_SUBNET=${ROS_NETWORK_SUBNET:-127.0.0.0/8}
+    volumes:
+      - ${GOAL_FILE:-../config/goals/example_bitl_goal.yaml}:/active_goal.yaml:ro
+      - bitl_logs:/app/logs
+    depends_on:
+      - bag_player
+    command:
+      - python3
+      - -m
+      - agent.main
+      - --mode
+      - bitl
+      - --goal
+      - /active_goal.yaml
+    restart: no
+
+volumes:
+  bitl_logs:
